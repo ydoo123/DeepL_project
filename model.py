@@ -82,9 +82,9 @@ class Tree(nn.Module):
         return out
 
 
-class DLA(nn.Module):
+class BaseModel(nn.Module):
     def __init__(self, block=BasicBlock, num_classes=10):
-        super(DLA, self).__init__()
+        super(BaseModel, self).__init__()
         self.base = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(16),
@@ -124,7 +124,7 @@ class DLA(nn.Module):
 
 
 def test():
-    net = DLA()
+    net = BaseModel()
     print(net)
     x = torch.randn(1, 3, 32, 32)
     y = net(x)
