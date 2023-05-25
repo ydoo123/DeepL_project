@@ -9,12 +9,13 @@ from model import BaseModel
 from tqdm import tqdm
 from PIL import Image
 
-class ImageDataset(Dataset):
 
-    def __init__(self, root_dir, transform=None, fmt=':04d', extension='.jpg'):
+class ImageDataset(Dataset):
+    def __init__(self, root_dir, transform=None, fmt=":04d", extension=".jpg"):
         self.root_dir = root_dir
-        self.fmtstr = '{' + fmt + '}' + extension
+        self.fmtstr = "{" + fmt + "}" + extension
         self.transform = transform
+        self.image_size = 128
 
     def __len__(self):
         return len(os.listdir(self.root_dir))
@@ -25,24 +26,30 @@ class ImageDataset(Dataset):
 
         img_name = self.fmtstr.format(idx)
         img_path = os.path.join(self.root_dir, img_name)
-        img = Image.open(img_path).convert('RGB')
+        img = Image.open(img_path).convert("RGB")
+
+        # Resize the image to the specified size
+        # img = img.resize((self.image_size, self.image_size), resample=Image.BILINEAR)
+
+        resize = transforms.Resize((32, 32))
+        img = resize(img)
         data = self.transform(img)
         return data
 
+
 def inference(args, data_loader, model):
-    """ model inference """
+    """model inference"""
 
     model.eval()
     preds = []
-    
+
     with torch.no_grad():
         pbar = tqdm(data_loader)
         for i, x in enumerate(pbar):
-            
             image = x.to(args.device)
-            
+
             y_hat = model(image)
-            
+
             y_hat.argmax()
 
             _, predicted = torch.max(y_hat, 1)
@@ -51,15 +58,18 @@ def inference(args, data_loader, model):
     return preds
 
 
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='2023 DL Term Project')
-    parser.add_argument('--load-model', default='checkpoints/model.pth', help="Model's state_dict")
-    parser.add_argument('--batch-size', default=16, help='test loader batch size')
-    parser.add_argument('--dataset', default='test_images/', help='image dataset directory')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="2023 DL Term Project")
+    parser.add_argument(
+        "--load-model", default="checkpoints/model.pth", help="Model's state_dict"
+    )
+    parser.add_argument("--batch-size", default=16, help="test loader batch size")
+    parser.add_argument(
+        "--dataset", default="test_images/", help="image dataset directory"
+    )
 
     args = parser.parse_args()
-    
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     args.device = device
 
@@ -70,11 +80,15 @@ if __name__ == '__main__':
 
     # load dataset in test image folder
     # you may need to edit transform
-    test_data = ImageDataset(args.dataset, transform=transforms.Compose([transforms.ToTensor()]))
+
+    # test_data = ImageDataset(args.dataset, transform=transforms.Compose([transforms.ToTensor()]))
+    test_data = ImageDataset(
+        args.dataset, transform=transforms.Compose([transforms.ToTensor()])
+    )
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.batch_size)
 
     # write model inference
     preds = inference(args, test_loader, model)
-        
-    with open('result.txt', 'w') as f:
-        f.writelines('\n'.join(map(str, preds)))
+
+    with open("result.txt", "w") as f:
+        f.writelines("\n".join(map(str, preds)))

@@ -6,43 +6,50 @@ from tqdm import tqdm
 from utils._utils import make_data_loader
 from model import BaseModel
 
+
 def test(args, data_loader, model):
     true = np.array([])
     pred = np.array([])
-    
+
     model.eval()
-    
+
     pbar = tqdm(data_loader)
     for i, (x, y) in enumerate(pbar):
-        
         image = x.to(args.device)
-        label = y.to(args.device)                
+        label = y.to(args.device)
 
         output = model(image)
-        
+
         label = label.squeeze()
         output = output.argmax(dim=-1)
         output = output.detach().cpu().numpy()
-        pred = np.append(pred,output, axis=0)
-        
+        pred = np.append(pred, output, axis=0)
+
         label = label.detach().cpu().numpy()
-        true =  np.append(true,label, axis=0)
+        true = np.append(true, label, axis=0)
 
     return pred, true
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='2023 DL Term Project')
-    parser.add_argument('--model-path', default='checkpoints/model.pth', help="Model's state_dict")
-    parser.add_argument('--data', default='data/', type=str, help='data folder')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="2023 DL Term Project")
+    parser.add_argument(
+        "--model-path", default="checkpoints/model.pth", help="Model's state_dict"
+    )
+    parser.add_argument("--data", default="data/", type=str, help="data folder")
+    parser.add_argument("--mps", action="store_true", help="use mps")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if args.mps:
+        device = torch.device("mps:0")
+
     args.device = device
-    
+
     # hyperparameters
-    args.batch_size = 4
-    
+    args.batch_size = 8
+
     # Make Data loader and Model
     _, test_loader = make_data_loader(args)
 
@@ -50,11 +57,9 @@ if __name__ == '__main__':
     model = BaseModel()
     model.load_state_dict(torch.load(args.model_path))
     model = model.to(device)
-    
+
     # Test The Model
     pred, true = test(args, test_loader, model)
-        
+
     accuracy = (true == pred).sum() / len(pred)
     print("Test Accuracy : {:.5f}".format(accuracy))
-
-    
