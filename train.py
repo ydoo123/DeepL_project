@@ -5,6 +5,37 @@ from tqdm import tqdm
 from utils._utils import make_data_loader
 from model import BaseModel
 from adabound import AdaBound
+import datetime
+from pytz import timezone
+import pandas as pd
+
+
+TIME_FORMAT = "%Y-%m-%d_%H:%M:%S"
+KST = timezone("Asia/Seoul")
+
+current_time = datetime.datetime.now(KST).strftime(TIME_FORMAT)
+
+train_loss_arr = np.array([])
+val_loss_arr = np.array([])
+train_acc_arr = np.array([])
+val_acc_arr = np.array([])
+epoch_arr = np.array([])
+
+
+def save_csv():
+    # make the dataframes with the loss and acc arrays
+    df = pd.DataFrame(
+        {
+            "epoch": epoch_arr,
+            "train_loss": train_loss_arr,
+            "val_loss": val_loss_arr,
+            "train_acc": train_acc_arr,
+            "val_acc": val_acc_arr,
+        }
+    )
+    # save the dataframes to csv, and name is current time
+    df.to_csv(f"csv/{current_time}.csv")
+    return None
 
 
 def acc(pred, label):
@@ -87,11 +118,17 @@ def train(args, train_loader, val_loader, model):
             f"{epoch_train_loss} {val_loss} {epoch_train_acc*100:.3f} {val_acc*100:.3f}"
         )
 
+        train_loss_arr = np.append(train_loss_arr, epoch_train_loss)
+        val_loss_arr = np.append(val_loss_arr, val_loss)
+        train_acc_arr = np.append(train_acc_arr, epoch_train_acc)
+        val_acc_arr = np.append(val_acc_arr, val_acc)
+        epoch_arr = np.append(epoch_arr, epoch + 1)
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_val_acc = val_acc
             early_stop_counter = 0
-            torch.save(model.state_dict(), f"{args.save_path}/model.pth")
+            torch.save(model.state_dict(), f"{args.save_path}/{current_time}.pth")
         else:
             early_stop_counter += 1
 
@@ -107,6 +144,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--data", default="data/", type=str, help="data folder")
     parser.add_argument("--mps", action="store_true", help="use mps")
+    parser.add_argument(
+        "--save_csv", action="store_true", help="save loss and acc to csv"
+    )
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -136,6 +176,8 @@ if __name__ == "__main__":
     print("Batch_size:", args.batch_size)
     print("learning_rate:", args.learning_rate)
     print("Epochs:", args.epochs)
+    print("==============================")
+    print(f"time: {current_time}")
     print("==============================")
 
     train_loader, val_loader = make_data_loader(args)
