@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 
 CURRENT_PATH = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(CURRENT_PATH, "csv")
+CSV_PATH = os.path.join(CURRENT_PATH, "plot")
 
 
 # get csv file and create dataframe
@@ -23,21 +23,30 @@ def get_csv_file():
     return csv_file[-1]
 
 
-def main():
-    file = get_csv_file()
+def read_csv_file(file):
+    return pd.read_csv(CSV_PATH + "/" + file)
 
-    # from csv and create dataframe
-    df = pd.DataFrame(pd.read_csv(os.path.join(CSV_PATH, file)))
 
+def plot_graph(df):
     # visualize loss with matplotlib
-    plt.plot(df["epoch"], df["train_loss"], label="train_loss")
-    plt.plot(df["epoch"], df["val_loss"], label="val_loss")
-
-    # visualize acc with matplotlib
-    plt.plot(df["epoch"], df["train_acc"], label="train_acc")
-    plt.plot(df["epoch"], df["val_acc"], label="val_acc")
+    # visualize loss with matplotlib
+    # visualize loss and acc with matplotlib
+    fig, axs = plt.subplots(2)
+    axs[0].plot(df["epoch"], df["train_loss"], label="train_loss")
+    axs[0].plot(df["epoch"], df["val_loss"], label="val_loss")
+    axs[1].plot(df["epoch"], df["train_acc"], label="train_acc")
+    axs[1].plot(df["epoch"], df["val_acc"], label="val_acc")
 
     # show graph
+    plt.legend()
     plt.show()
 
-    return None
+
+def main():
+    file = get_csv_file()
+    df = read_csv_file(file)
+    plot_graph(df)
+
+
+if __name__ == "__main__":
+    main()
