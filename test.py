@@ -4,7 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from utils._utils import make_data_loader
-from model import BaseModel
+from model import ShuffleNetV2
 
 
 def test(args, data_loader, model):
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     _, test_loader = make_data_loader(args)
 
     # instantiate model
-    model = BaseModel()
+    model = ShuffleNetV2(net_size=0.5)
     model.load_state_dict(torch.load(args.model_path))
     model = model.to(device)
 

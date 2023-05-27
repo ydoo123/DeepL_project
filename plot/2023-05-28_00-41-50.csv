@@ -1,0 +1,4 @@
+,epoch,train_loss,val_loss,train_acc,val_acc
+0,1.0,1.7022720567710565,1.5734081928897057,0.36516,0.4343
+
+# {'epoch': 100, 'lr': 0.01, 'batch_size': 64}
