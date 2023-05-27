@@ -3,26 +3,20 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from utils._utils import make_data_loader
-from model import BaseModel
+from model import MobileNetV3
 from adabound import AdaBound
 import datetime
 from pytz import timezone
 import pandas as pd
 
 
-TIME_FORMAT = "%Y-%m-%d_%H:%M:%S"
+TIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 KST = timezone("Asia/Seoul")
 
 current_time = datetime.datetime.now(KST).strftime(TIME_FORMAT)
 
-train_loss_arr = np.array([])
-val_loss_arr = np.array([])
-train_acc_arr = np.array([])
-val_acc_arr = np.array([])
-epoch_arr = np.array([])
 
-
-def save_csv():
+def save_csv(epoch_arr, train_loss_arr, val_loss_arr, train_acc_arr, val_acc_arr):
     # make the dataframes with the loss and acc arrays
     df = pd.DataFrame(
         {
@@ -34,7 +28,7 @@ def save_csv():
         }
     )
     # save the dataframes to csv, and name is current time
-    df.to_csv(f"csv/{current_time}.csv")
+    df.to_csv(f"plot/{current_time}.csv")
     return None
 
 
@@ -70,6 +64,12 @@ def validate(data_loader, model, criterion):
 
 
 def train(args, train_loader, val_loader, model):
+    train_loss_arr = np.array([])
+    val_loss_arr = np.array([])
+    train_acc_arr = np.array([])
+    val_acc_arr = np.array([])
+    epoch_arr = np.array([])
+
     criterion = torch.nn.CrossEntropyLoss()
     # optimizer = AdaBound(model.parameters(), lr=args.learning_rate)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -129,8 +129,11 @@ def train(args, train_loader, val_loader, model):
             best_val_acc = val_acc
             early_stop_counter = 0
             torch.save(model.state_dict(), f"{args.save_path}/{current_time}.pth")
+
         else:
             early_stop_counter += 1
+
+        save_csv(epoch_arr, train_loss_arr, val_loss_arr, train_acc_arr, val_acc_arr)
 
         if early_stop_counter >= patience:
             print("Early stopping. No improvement in validation loss.")
@@ -163,8 +166,8 @@ if __name__ == "__main__":
 
     # hyperparameters
     args.epochs = 100
-    args.learning_rate = 0.075
-    args.batch_size = 256
+    args.learning_rate = 0.01
+    args.batch_size = 64
 
     # check settings
     print("==============================")
@@ -182,7 +185,7 @@ if __name__ == "__main__":
 
     train_loader, val_loader = make_data_loader(args)
 
-    model = BaseModel()
+    model = MobileNetV3()
     model.to(device)
 
     # Training The Model

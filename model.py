@@ -1,142 +1,274 @@
-"""Simplified version of DLA in PyTorch.
-
-Note this implementation is not identical to the original paper version.
-But it seems works fine.
-
-See dla.py for the original paper version.
-
-Reference:
-    Deep Layer Aggregation. https://arxiv.org/abs/1707.06484
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class BasicBlock(nn.Module):
-    expansion = 1
+__all__ = ["MobileNetV3", "mobilenetv3"]
 
-    def __init__(self, in_planes, planes, stride=1):
-        super(BasicBlock, self).__init__()
-        self.conv1 = nn.Conv2d(
-            in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False
-        )
-        self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(
-            planes, planes, kernel_size=3, stride=1, padding=1, bias=False
-        )
-        self.bn2 = nn.BatchNorm2d(planes)
 
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_planes,
-                    self.expansion * planes,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(self.expansion * planes),
-            )
+def conv_bn(
+    inp,
+    oup,
+    stride,
+    conv_layer=nn.Conv2d,
+    norm_layer=nn.BatchNorm2d,
+    nlin_layer=nn.ReLU,
+):
+    return nn.Sequential(
+        conv_layer(inp, oup, 3, stride, 1, bias=False),
+        norm_layer(oup),
+        nlin_layer(inplace=True),
+    )
+
+
+def conv_1x1_bn(
+    inp, oup, conv_layer=nn.Conv2d, norm_layer=nn.BatchNorm2d, nlin_layer=nn.ReLU
+):
+    return nn.Sequential(
+        conv_layer(inp, oup, 1, 1, 0, bias=False),
+        norm_layer(oup),
+        nlin_layer(inplace=True),
+    )
+
+
+class Hswish(nn.Module):
+    def __init__(self, inplace=True):
+        super(Hswish, self).__init__()
+        self.inplace = inplace
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += self.shortcut(x)
-        out = F.relu(out)
-        return out
+        return x * F.relu6(x + 3.0, inplace=self.inplace) / 6.0
 
 
-class Root(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=1):
-        super(Root, self).__init__()
-        self.conv = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=1,
-            padding=(kernel_size - 1) // 2,
-            bias=False,
+class Hsigmoid(nn.Module):
+    def __init__(self, inplace=True):
+        super(Hsigmoid, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, x):
+        return F.relu6(x + 3.0, inplace=self.inplace) / 6.0
+
+
+class SEModule(nn.Module):
+    def __init__(self, channel, reduction=4):
+        super(SEModule, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            Hsigmoid()
+            # nn.Sigmoid()
         )
-        self.bn = nn.BatchNorm2d(out_channels)
 
-    def forward(self, xs):
-        x = torch.cat(xs, 1)
-        out = F.relu(self.bn(self.conv(x)))
-        return out
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
 
 
-class Tree(nn.Module):
-    def __init__(self, block, in_channels, out_channels, level=1, stride=1):
-        super(Tree, self).__init__()
-        self.root = Root(2 * out_channels, out_channels)
-        if level == 1:
-            self.left_tree = block(in_channels, out_channels, stride=stride)
-            self.right_tree = block(out_channels, out_channels, stride=1)
+class Identity(nn.Module):
+    def __init__(self, channel):
+        super(Identity, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
+def make_divisible(x, divisible_by=8):
+    import numpy as np
+
+    return int(np.ceil(x * 1.0 / divisible_by) * divisible_by)
+
+
+class MobileBottleneck(nn.Module):
+    def __init__(self, inp, oup, kernel, stride, exp, se=False, nl="RE"):
+        super(MobileBottleneck, self).__init__()
+        assert stride in [1, 2]
+        assert kernel in [3, 5]
+        padding = (kernel - 1) // 2
+        self.use_res_connect = stride == 1 and inp == oup
+
+        conv_layer = nn.Conv2d
+        norm_layer = nn.BatchNorm2d
+        if nl == "RE":
+            nlin_layer = nn.ReLU  # or ReLU6
+        elif nl == "HS":
+            nlin_layer = Hswish
         else:
-            self.left_tree = Tree(
-                block, in_channels, out_channels, level=level - 1, stride=stride
-            )
-            self.right_tree = Tree(
-                block, out_channels, out_channels, level=level - 1, stride=1
-            )
+            raise NotImplementedError
+        if se:
+            SELayer = SEModule
+        else:
+            SELayer = Identity
+
+        self.conv = nn.Sequential(
+            # pw
+            conv_layer(inp, exp, 1, 1, 0, bias=False),
+            norm_layer(exp),
+            nlin_layer(inplace=True),
+            # dw
+            conv_layer(exp, exp, kernel, stride, padding, groups=exp, bias=False),
+            norm_layer(exp),
+            SELayer(exp),
+            nlin_layer(inplace=True),
+            # pw-linear
+            conv_layer(exp, oup, 1, 1, 0, bias=False),
+            norm_layer(oup),
+        )
 
     def forward(self, x):
-        out1 = self.left_tree(x)
-        out2 = self.right_tree(out1)
-        out = self.root([out1, out2])
-        return out
+        if self.use_res_connect:
+            return x + self.conv(x)
+        else:
+            return self.conv(x)
 
 
-class BaseModel(nn.Module):
-    def __init__(self, block=BasicBlock, num_classes=10):
-        super(BaseModel, self).__init__()
-        self.base = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(True),
+class MobileNetV3(nn.Module):
+    def __init__(
+        self, n_class=1000, input_size=224, dropout=0.8, mode="small", width_mult=1.0
+    ):
+        super(MobileNetV3, self).__init__()
+        input_channel = 16
+        last_channel = 1280
+        if mode == "large":
+            # refer to Table 1 in paper
+            mobile_setting = [
+                # k, exp, c,  se,     nl,  s,
+                [3, 16, 16, False, "RE", 1],
+                [3, 64, 24, False, "RE", 2],
+                [3, 72, 24, False, "RE", 1],
+                [5, 72, 40, True, "RE", 2],
+                [5, 120, 40, True, "RE", 1],
+                [5, 120, 40, True, "RE", 1],
+                [3, 240, 80, False, "HS", 2],
+                [3, 200, 80, False, "HS", 1],
+                [3, 184, 80, False, "HS", 1],
+                [3, 184, 80, False, "HS", 1],
+                [3, 480, 112, True, "HS", 1],
+                [3, 672, 112, True, "HS", 1],
+                [5, 672, 160, True, "HS", 2],
+                [5, 960, 160, True, "HS", 1],
+                [5, 960, 160, True, "HS", 1],
+            ]
+        elif mode == "small":
+            # refer to Table 2 in paper
+            mobile_setting = [
+                # k, exp, c,  se,     nl,  s,
+                [3, 16, 16, True, "RE", 2],
+                [3, 72, 24, False, "RE", 2],
+                [3, 88, 24, False, "RE", 1],
+                [5, 96, 40, True, "HS", 2],
+                [5, 240, 40, True, "HS", 1],
+                [5, 240, 40, True, "HS", 1],
+                [5, 120, 48, True, "HS", 1],
+                [5, 144, 48, True, "HS", 1],
+                [5, 288, 96, True, "HS", 2],
+                [5, 576, 96, True, "HS", 1],
+                [5, 576, 96, True, "HS", 1],
+            ]
+        else:
+            raise NotImplementedError
+
+        # building first layer
+        assert input_size % 32 == 0
+        last_channel = (
+            make_divisible(last_channel * width_mult)
+            if width_mult > 1.0
+            else last_channel
+        )
+        self.features = [conv_bn(3, input_channel, 2, nlin_layer=Hswish)]
+        self.classifier = []
+
+        # building mobile blocks
+        for k, exp, c, se, nl, s in mobile_setting:
+            output_channel = make_divisible(c * width_mult)
+            exp_channel = make_divisible(exp * width_mult)
+            self.features.append(
+                MobileBottleneck(
+                    input_channel, output_channel, k, s, exp_channel, se, nl
+                )
+            )
+            input_channel = output_channel
+
+        # building last several layers
+        if mode == "large":
+            last_conv = make_divisible(960 * width_mult)
+            self.features.append(
+                conv_1x1_bn(input_channel, last_conv, nlin_layer=Hswish)
+            )
+            self.features.append(nn.AdaptiveAvgPool2d(1))
+            self.features.append(nn.Conv2d(last_conv, last_channel, 1, 1, 0))
+            self.features.append(Hswish(inplace=True))
+        elif mode == "small":
+            last_conv = make_divisible(576 * width_mult)
+            self.features.append(
+                conv_1x1_bn(input_channel, last_conv, nlin_layer=Hswish)
+            )
+            # self.features.append(SEModule(last_conv))  # refer to paper Table2, but I think this is a mistake
+            self.features.append(nn.AdaptiveAvgPool2d(1))
+            self.features.append(nn.Conv2d(last_conv, last_channel, 1, 1, 0))
+            self.features.append(Hswish(inplace=True))
+        else:
+            raise NotImplementedError
+
+        # make it nn.Sequential
+        self.features = nn.Sequential(*self.features)
+
+        # building classifier
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=dropout),  # refer to paper section 6
+            nn.Linear(last_channel, n_class),
         )
 
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(True),
-        )
-
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(True),
-        )
-
-        self.layer3 = Tree(block, 32, 64, level=1, stride=1)
-        self.layer4 = Tree(block, 64, 128, level=2, stride=2)
-        self.layer5 = Tree(block, 128, 256, level=2, stride=2)
-        self.layer6 = Tree(block, 256, 512, level=1, stride=2)
-        self.linear = nn.Linear(512, num_classes)
+        self._initialize_weights()
 
     def forward(self, x):
-        out = self.base(x)
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = self.layer5(out)
-        out = self.layer6(out)
-        out = F.avg_pool2d(out, 4)
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-        return out
+        x = self.features(x)
+        x = x.mean(3).mean(2)
+        x = self.classifier(x)
+        return x
+
+    def _initialize_weights(self):
+        # weight initialization
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
 
-def test():
-    net = BaseModel()
-    print(net)
-    x = torch.randn(1, 3, 32, 32)
-    y = net(x)
-    print(y.size())
+def mobilenetv3(pretrained=False, **kwargs):
+    model = MobileNetV3(**kwargs)
+    if pretrained:
+        state_dict = torch.load("mobilenetv3_small_67.4.pth.tar")
+        model.load_state_dict(state_dict, strict=True)
+        # raise NotImplementedError
+    return model
 
 
 if __name__ == "__main__":
-    test()
+    net = mobilenetv3()
+    print("mobilenetv3:\n", net)
+    print(
+        "Total params: %.2fM" % (sum(p.numel() for p in net.parameters()) / 1000000.0)
+    )
+    input_size = (1, 3, 224, 224)
+    # pip install --upgrade git+https://github.com/kuan-wang/pytorch-OpCounter.git
+    from thop import profile
+
+    flops, params = profile(net, input_size=input_size)
+    # print(flops)
+    # print(params)
+    print("Total params: %.2fM" % (params / 1000000.0))
+    print("Total flops: %.2fM" % (flops / 1000000.0))
+    x = torch.randn(input_size)
+    out = net(x)
