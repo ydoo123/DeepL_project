@@ -185,7 +185,7 @@ if __name__ == "__main__":
 
     train_loader, val_loader = make_data_loader(args)
 
-    model = MobileNetV3()
+    model = MobileNetV3(mode="small")
     model.to(device)
 
     # Training The Model
