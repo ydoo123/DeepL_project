@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from utils._utils import make_data_loader
-from model import PyramidNet
+from model import MobileNetV2
 from adabound import AdaBound
 import datetime
 from pytz import timezone
@@ -185,7 +185,7 @@ if __name__ == "__main__":
 
     train_loader, val_loader = make_data_loader(args)
 
-    model = PyramidNet()
+    model = MobileNetV2()
     model.to(device)
 
     # Training The Model
