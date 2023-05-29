@@ -3,11 +3,12 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from utils._utils import make_data_loader
-from model import resnet18
+from model import MobileNetV2
 from adabound import AdaBound
 import datetime
 from pytz import timezone
 import pandas as pd
+from test import test
 
 
 TIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
@@ -150,6 +151,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_csv", action="store_true", help="save loss and acc to csv"
     )
+    parser.add_argument("--test", action="store_true", help="test mode")
+
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -183,10 +186,18 @@ if __name__ == "__main__":
     print(f"time: {current_time}")
     print("==============================")
 
-    train_loader, val_loader = make_data_loader(args)
+    train_loader, val_loader, test_loader = make_data_loader(args)
 
-    model = resnet18()
+    model = MobileNetV2()
     model.to(device)
 
     # Training The Model
     train(args, train_loader, val_loader, model)
+
+    print("=====================================")
+    print("Training Finished")
+    if args.test:
+        pred, true = test(args, test_loader, model)
+
+        accuracy = (true == pred).sum() / len(pred)
+        print("Test Accuracy : {:.5f}".format(accuracy))

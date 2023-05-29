@@ -4,7 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from utils._utils import make_data_loader
-from model import resnet18
+from model import MobileNetV2
 
 
 def test(args, data_loader, model):
@@ -51,10 +51,10 @@ if __name__ == "__main__":
     args.batch_size = 8
 
     # Make Data loader and Model
-    _, test_loader = make_data_loader(args)
+    _, _, test_loader = make_data_loader(args)
 
     # instantiate model
-    model = resnet18()
+    model = MobileNetV2()
     model.load_state_dict(torch.load(args.model_path))
     model = model.to(device)
 
