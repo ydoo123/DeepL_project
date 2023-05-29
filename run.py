@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
-from model import BaseModel
+from model import resnet18
 from tqdm import tqdm
 from PIL import Image
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     args.device = device
 
     # instantiate model
-    model = BaseModel()
+    model = resnet18()
     model.load_state_dict(torch.load(args.load_model))
     model.to(device)
 
